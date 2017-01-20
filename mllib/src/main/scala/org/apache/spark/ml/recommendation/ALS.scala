@@ -356,8 +356,8 @@ object ALSModel extends MLReadable[ALSModel] {
 
 }
 
-case class LambdaUpdater() {
-  var lambda: Double = 0
+abstract class LambdaUpdater() {
+  var lambda: Double
 
   def update(): Unit = {
     lambda += 1
@@ -465,6 +465,60 @@ case class NNLSSolver() extends LeastSquaresNESolver {
         j += 1
       }
       ata(i * rank + i) += lambda
+      i += 1
+    }
+  }
+}
+
+case class NNLSSolverDifferentLambda() extends LeastSquaresNESolver {
+  private var rank: Int = -1
+  private var workspace: NNLS.Workspace = _
+  private var ata: Array[Double] = _
+  private var initialized: Boolean = false
+
+  private def initialize(rank: Int): Unit = {
+    if (!initialized) {
+      this.rank = rank
+      workspace = NNLS.createWorkspace(rank)
+      ata = new Array[Double](rank * rank)
+      initialized = true
+    } else {
+      require(this.rank == rank)
+    }
+  }
+
+  /**
+    * Solves a nonnegative least squares problem with L2 regularization:
+    *
+    * min_x_  norm(A x - b)^2^ + lambda * n * norm(x)^2^
+    * subject to x >= 0
+    */
+  override def solve(ne: NormalEquation, lambda: Double): Array[Float] = {
+    val rank = ne.k
+    initialize(rank)
+    fillAtA(ne.ata, lambda)
+    val x = NNLS.solve(ata, ne.atb, workspace)
+    ne.reset()
+    x.map(x => x.toFloat)
+  }
+
+  /**
+    * Given a triangular matrix in the order of fillXtX above, compute the full symmetric square
+    * matrix that it represents, storing it into destMatrix.
+    */
+  private def fillAtA(triAtA: Array[Double], lambda: Double) {
+    var i = 0
+    var pos = 0
+    var a = 0.0
+    while (i < rank) {
+      var j = 0
+      while (j <= i) {
+        a = triAtA(pos)
+        ata(i * rank + j) = a + lambda
+        ata(j * rank + i) = a + lambda
+        pos += 1
+        j += 1
+      }
       i += 1
     }
   }
@@ -634,7 +688,7 @@ class ALS(@Since("1.4.0") override val uid: String) extends Estimator[ALSModel] 
 
   @Since("2.0.0")
   override def fit(dataset: Dataset[_]): ALSModel = {
-    fit(dataset, LambdaUpdater(), LambdaUpdater(), NNLSSolver(), NNLSSolver())
+    fit(dataset, ConstLambda(1.0), ConstLambda(1.0), NNLSSolver(), NNLSSolver())
   }
 
   @Since("2.0.0")
