@@ -374,6 +374,21 @@ case class ConstLambda(override var lambda: Double) extends LambdaUpdater {
   override def update(): Unit = {}
 }
 
+case class VariableLambda(override var lambda: Double,
+                          minimal_value : Double,
+                          division : Double) extends LambdaUpdater {
+
+  var initial_lambda: Double = lambda
+
+  override def reset(): Unit = {
+    lambda = initial_lambda
+  }
+
+  override def update(): Unit = {
+    lambda = math.max(minimal_value, lambda/division)
+  }
+}
+
 /** Trait for least squares solvers applied to the normal equation. */
 trait LeastSquaresNESolver extends Serializable {
   /** Solves a least squares problem with regularization (possibly with other constraints). */
@@ -1531,3 +1546,4 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
     }
   }
 }
+
