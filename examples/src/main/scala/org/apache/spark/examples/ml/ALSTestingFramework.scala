@@ -73,11 +73,13 @@ object ALSTestingFramework {
       NNLSSolverDifferentLambda,
       CholeskySolver)
 
-    new File("/tmp/out/").mkdirs()
+    val outDir = "~/ALSTestingOut/"
+
+    new File(outDir).mkdirs()
 
     for (solver1 <- solverClasses; solver2 <- solverClasses) {
       val fileName = solver1().getClass.getSimpleName + "_" + solver2().getClass.getSimpleName
-      val file = new File("/tmp/out/" + fileName)
+      val file = new File(outDir + fileName)
       val outputStream = new PrintStream(file)
       map.put(fileName, outputStream)
     }
@@ -122,7 +124,7 @@ object ALSTestingFramework {
       }
     }
 
-    val file = new File("/tmp/out/theBest")
+    val file = new File(outDir + "theBest")
     val outputStream = new PrintStream(file)
     outputStream.println(bestAlsParams.toString)
     outputStream.close()
