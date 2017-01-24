@@ -20,26 +20,28 @@ package org.apache.spark.examples.ml
 
 // $example on$
 import org.apache.spark.ml.evaluation.RegressionEvaluator
-import org.apache.spark.ml.recommendation.ALS
+import org.apache.spark.ml.recommendation.{ALS, NNLSSolver, VariableLambda}
 // $example off$
 import org.apache.spark.sql.SparkSession
 
 /**
- * An example demonstrating ALS.
- * Run with
- * {{{
- * bin/run-example ml.ALSExample
- * }}}
- */
+  * An example demonstrating ALS.
+  * Run with
+  * {{{
+  * bin/run-example ml.ALSExample
+  * }}}
+  */
 object ALSExample {
 
   // $example on$
   case class Rating(userId: Int, movieId: Int, rating: Float, timestamp: Long)
+
   def parseRating(str: String): Rating = {
     val fields = str.split("::")
     assert(fields.size == 4)
     Rating(fields(0).toInt, fields(1).toInt, fields(2).toFloat, fields(3).toLong)
   }
+
   // $example off$
 
   def main(args: Array[String]) {
@@ -62,7 +64,8 @@ object ALSExample {
       .setUserCol("userId")
       .setItemCol("movieId")
       .setRatingCol("rating")
-    val model = als.fit(training)
+    val model = als.fit(training, VariableLambda(1.0, 0.001, 2), VariableLambda(1.0, 0.001, 2),
+        NNLSSolver(), NNLSSolver())
 
     // Evaluate the model by computing the RMSE on the test data
     val predictions = model.transform(test)
@@ -78,5 +81,6 @@ object ALSExample {
     spark.stop()
   }
 }
+
 // scalastyle:on println
 

@@ -372,11 +372,15 @@ case class ConstLambda(override var lambda: Double) extends LambdaUpdater {
   override def reset(): Unit = {}
 
   override def update(): Unit = {}
+
+  override def toString(): String = {
+    s"{ConstLambda: lambda=$lambda}"
+  }
 }
 
 case class VariableLambda(override var lambda: Double,
-                          minimal_value : Double,
-                          division : Double) extends LambdaUpdater {
+                          minimal_value: Double,
+                          division: Double) extends LambdaUpdater {
 
   var initial_lambda: Double = lambda
 
@@ -385,7 +389,11 @@ case class VariableLambda(override var lambda: Double,
   }
 
   override def update(): Unit = {
-    lambda = math.max(minimal_value, lambda/division)
+    lambda = math.max(minimal_value, lambda / division)
+  }
+
+  override def toString: String = {
+    s"{VariableLambda:start_lambda=$initial_lambda, min_val=$minimal_value, div=$division}"
   }
 }
 
@@ -396,7 +404,7 @@ trait LeastSquaresNESolver extends Serializable {
 }
 
 /** Cholesky solver for least square problems. */
-class CholeskySolver extends LeastSquaresNESolver {
+case class CholeskySolver() extends LeastSquaresNESolver {
 
   /**
     * Solves a least squares problem with L2 regularization:
