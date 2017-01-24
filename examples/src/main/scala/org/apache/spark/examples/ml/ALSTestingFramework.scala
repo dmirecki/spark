@@ -73,7 +73,7 @@ object ALSTestingFramework {
       NNLSSolverDifferentLambda,
       CholeskySolver)
 
-    val outDir = "~/ALSTestingOut/"
+    val outDir = "../ALSTestingOut/"
 
     new File(outDir).mkdirs()
 
