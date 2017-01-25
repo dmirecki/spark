@@ -68,7 +68,7 @@ object ALSTestingFramework {
     val maxIterations = Array(5, 10, 20, 100)
     val lambdas = Array(0.01, 0.05, 0.1, 0.5, 5, 10)
     val ranks = Array(4, 8, 12)
-    val divisions = Array(2, 3, 4, 5)
+    val divisions = Array(2)
     val solverClasses = Array(NNLSSolver,
       NNLSSolverDifferentLambda,
       CholeskySolver)
@@ -112,14 +112,6 @@ object ALSTestingFramework {
             solver1(),
             solver2(),
             training, test, maxIter, lambda, rank)
-
-          if (lambda != lambda2) {
-            runWithLambdaUpdater(VariableLambda(lambda2, Math.pow(0.1, 12.0), division),
-              VariableLambda(lambda, Math.pow(0.1, 12.0), division),
-              solver1(),
-              solver2(),
-              training, test, maxIter, lambda2, rank)
-          }
         }
       }
     }
