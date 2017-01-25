@@ -65,7 +65,7 @@ object ALSTestingFramework {
       .toDF()
     val Array(training, test) = ratings.randomSplit(Array(0.8, 0.2))
 
-    val maxIterations = Array(5, 10, 20, 100)
+    val maxIterations = Array(5, 10, 20)
     val lambdas = Array(0.01, 0.05, 0.1, 0.5, 5, 10)
     val ranks = Array(4, 8, 12)
     val divisions = Array(2)
@@ -73,7 +73,7 @@ object ALSTestingFramework {
       NNLSSolverDifferentLambda,
       CholeskySolver)
 
-    val outDir = "../ALSTestingOut/"
+    val outDir = args(0)
 
     new File(outDir).mkdirs()
 
