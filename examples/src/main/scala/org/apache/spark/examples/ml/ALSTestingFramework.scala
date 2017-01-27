@@ -44,13 +44,12 @@ object ALSTestingFramework {
 
   // $example off$
 
-  case class AlsParams(rmse: Double, maxIter: Int, rank: Int, lambda: Double,
-                       solver1: String, solver2: String,
+  case class AlsParams(rmse: Double, maxIter: Int, rank: Int, solver1: String, solver2: String,
                        lambdaUpdater1: String, lambdaUpdater2: String)
 
   val map = new util.HashMap[String, PrintStream]()
 
-  var bestAlsParams = AlsParams(Double.PositiveInfinity, 0, 0, 0, "", "", "", "")
+  var bestAlsParams = AlsParams(Double.PositiveInfinity, 0, 0, "", "", "", "")
 
   def main(args: Array[String]) {
     val spark = SparkSession
@@ -66,12 +65,12 @@ object ALSTestingFramework {
     val Array(training, test) = ratings.randomSplit(Array(0.8, 0.2))
 
     val maxIterations = Array(5, 10, 20)
-    val lambdas = Array(0.01, 0.05, 0.1, 0.5, 5, 10)
-    val ranks = Array(4, 8, 12)
-    val divisions = Array(2)
-    val solverClasses = Array(NNLSSolver,
-      NNLSSolverDifferentLambda,
-      CholeskySolver)
+    val lambdasForVariableUpdater = Array(1, 5, 10, 15)
+    val lambdasForConstUpdater = Array(0.1, 0.5, 1)
+    val ranks = Array(8, 12)
+    val divisions = Array(2, 4)
+    val solverClasses = Array(CholeskySolver, NNLSSolver,
+      NNLSSolverDifferentLambda)
 
     val outDir = args(0)
 
@@ -84,34 +83,30 @@ object ALSTestingFramework {
       map.put(fileName, outputStream)
     }
 
-    for (maxIter <- maxIterations; lambda <- lambdas; rank <- ranks;
-         solver1 <- solverClasses; solver2 <- solverClasses) {
-
-      runWithLambdaUpdater(ConstLambda(lambda), ConstLambda(lambda),
-        solver1(),
-        solver2(),
-        training, test, maxIter, lambda, rank)
-
-      for (division <- divisions) {
-
-        runWithLambdaUpdater(VariableLambda(lambda, Math.pow(0.1, 12.0), division),
-          ConstLambda(lambda),
+    for (solver1 <- solverClasses; solver2 <- solverClasses;
+         maxIter <- maxIterations; rank <- ranks) {
+      for (constLambda <- lambdasForConstUpdater) {
+        runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
           solver1(),
           solver2(),
-          training, test, maxIter, lambda, rank)
+          training, test, maxIter, rank)
 
-        runWithLambdaUpdater(ConstLambda(lambda),
-          VariableLambda(lambda, Math.pow(0.1, 12.0), division),
-          solver1(),
-          solver2(),
-          training, test, maxIter, lambda, rank)
+        for (variableLambda <- lambdasForVariableUpdater) {
+          for (division <- divisions) {
+            runWithLambdaUpdater(
+              VariableLambda(variableLambda, Math.pow(10, -10.0), division),
+              ConstLambda(constLambda),
+              solver1(),
+              solver2(),
+              training, test, maxIter, rank)
 
-        for (lambda2 <- lambdas) {
-          runWithLambdaUpdater(VariableLambda(lambda, Math.pow(0.1, 12.0), division),
-            VariableLambda(lambda2, Math.pow(0.1, 12.0), division),
-            solver1(),
-            solver2(),
-            training, test, maxIter, lambda, rank)
+            runWithLambdaUpdater(
+              ConstLambda(constLambda),
+              VariableLambda(variableLambda, Math.pow(10, -10.0), division),
+              solver1(),
+              solver2(),
+              training, test, maxIter, rank)
+          }
         }
       }
     }
@@ -134,11 +129,10 @@ object ALSTestingFramework {
   def runWithLambdaUpdater(lambdaUpdater1: LambdaUpdater, lambdaUpdater2: LambdaUpdater,
                            solver1: LeastSquaresNESolver, solver2: LeastSquaresNESolver,
                            training: Dataset[_], test: Dataset[_],
-                           maxIter: Int, lambda: Double, rank: Int) {
+                           maxIter: Int, rank: Int) {
     val als = new ALS()
       .setMaxIter(maxIter)
       .setRank(rank)
-      .setRegParam(lambda)
       .setUserCol("userId")
       .setItemCol("movieId")
       .setRatingCol("rating")
@@ -155,18 +149,20 @@ object ALSTestingFramework {
     val rmse = evaluator.evaluate(predictions)
 
     if (rmse < bestAlsParams.rmse) {
-      bestAlsParams = AlsParams(rmse, maxIter, rank, lambda,
+      bestAlsParams = AlsParams(rmse, maxIter, rank,
         solver1.getClass.getSimpleName,
         solver2.getClass.getSimpleName,
         lambdaUpdater1.toString, lambdaUpdater2.toString)
     }
 
     val fileName = solver1.getClass.getSimpleName + "_" + solver2.getClass.getSimpleName
-    map.get(fileName).println(s"RESULT FOR:" +
-      s" maxIter: $maxIter, rank: $rank, lambda: $lambda" +
-      s" lu1: ${lambdaUpdater1.toString}," +
-      s" lu2: ${lambdaUpdater2.toString}" +
-      s" = RMSE $rmse")
+
+    val csvLine = "%015.10f;%s;%s;%s;%s;%d;%d".format(rmse, solver1.getClass.getSimpleName,
+      solver2.getClass.getSimpleName, lambdaUpdater1.toString, lambdaUpdater2.toString,
+      maxIter, rank)
+
+    map.get(fileName).println(csvLine)
+
   }
 
 }

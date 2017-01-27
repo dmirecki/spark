@@ -393,7 +393,7 @@ case class VariableLambda(override var lambda: Double,
   }
 
   override def toString: String = {
-    s"{VariableLambda:start_lambda=$initial_lambda, min_val=$minimal_value, div=$division}"
+    s"{VariableLambda: start_lambda=$initial_lambda min_val=$minimal_value div=$division}"
   }
 }
 
