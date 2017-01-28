@@ -65,10 +65,10 @@ object ALSTestingFramework {
     val Array(training, test) = ratings.randomSplit(Array(0.8, 0.2))
 
     val maxIterations = Array(5, 10, 20)
-    val lambdasForVariableUpdater = Array(1, 5, 10, 15)
-    val lambdasForConstUpdater = Array(0.1, 0.5, 1)
+    val lambdasForVariableUpdater = Array(10, 15, 20)
+    val lambdasForConstUpdater = Array(1, 2)
     val ranks = Array(8, 12)
-    val divisions = Array(2, 4)
+    val divisions = Array(2)
     val solverClasses = Array(CholeskySolver, NNLSSolver,
       NNLSSolverDifferentLambda)
 
@@ -85,27 +85,33 @@ object ALSTestingFramework {
 
     for (solver1 <- solverClasses; solver2 <- solverClasses;
          maxIter <- maxIterations; rank <- ranks) {
-      for (constLambda <- lambdasForConstUpdater) {
-        runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
-          solver1(),
-          solver2(),
-          training, test, maxIter, rank)
+      if ( (solver1 == CholeskySolver && solver2 == NNLSSolverDifferentLambda)
+      || (solver1 == NNLSSolverDifferentLambda && solver2 == CholeskySolver)) {
+        // nothing to do
+      }
+      else {
+        for (constLambda <- lambdasForConstUpdater) {
+          runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
+            solver1(),
+            solver2(),
+            training, test, maxIter, rank)
 
-        for (variableLambda <- lambdasForVariableUpdater) {
-          for (division <- divisions) {
-            runWithLambdaUpdater(
-              VariableLambda(variableLambda, Math.pow(10, -10.0), division),
-              ConstLambda(constLambda),
-              solver1(),
-              solver2(),
-              training, test, maxIter, rank)
+          for (variableLambda <- lambdasForVariableUpdater) {
+            for (division <- divisions) {
+              runWithLambdaUpdater(
+                VariableLambda(variableLambda, Math.pow(10, -10.0), division),
+                ConstLambda(constLambda),
+                solver1(),
+                solver2(),
+                training, test, maxIter, rank)
 
-            runWithLambdaUpdater(
-              ConstLambda(constLambda),
-              VariableLambda(variableLambda, Math.pow(10, -10.0), division),
-              solver1(),
-              solver2(),
-              training, test, maxIter, rank)
+              runWithLambdaUpdater(
+                ConstLambda(constLambda),
+                VariableLambda(variableLambda, Math.pow(10, -10.0), division),
+                solver1(),
+                solver2(),
+                training, test, maxIter, rank)
+            }
           }
         }
       }
