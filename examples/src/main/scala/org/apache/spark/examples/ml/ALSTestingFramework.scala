@@ -58,21 +58,33 @@ object ALSTestingFramework {
       .getOrCreate()
     import spark.implicits._
 
+    val outDir = args(0)
+    val inputFile = args(1)
+    val maxIterParams = args(2)
+    val lambdasForVariableUpdaterParams = args(3)
+    val lambdasForConstUpdaterParams = args(4)
+    val ranksParams = args(5)
+    val divisionsParam = args(6)
+    val minLambdaInVariableUpdaterParam = args(7)
+
     // $example on$
-    val ratings = spark.read.textFile("data/mllib/als/sample_movielens_ratings.txt")
+    //    val ratings = spark.read.textFile("data/mllib/als/sample_movielens_ratings.txt")
+    //      .map(parseRating)
+    //      .toDF()
+    val ratings = spark.read.textFile(inputFile)
       .map(parseRating)
       .toDF()
     val Array(training, test) = ratings.randomSplit(Array(0.8, 0.2))
 
-    val maxIterations = Array(5, 10, 20)
-    val lambdasForVariableUpdater = Array(10, 15, 20)
-    val lambdasForConstUpdater = Array(1, 2)
-    val ranks = Array(8, 12)
-    val divisions = Array(2)
+    val maxIterations = maxIterParams.split(",").map(_.toInt)
+    val lambdasForVariableUpdater = lambdasForVariableUpdaterParams.split(",").map(_.toDouble)
+    val lambdasForConstUpdater = lambdasForConstUpdaterParams.split(",").map(_.toDouble)
+    val ranks = ranksParams.split(",").map(_.toInt)
+    val divisions = divisionsParam.split(",").map(_.toDouble)
+    val minLambdaInVariableUpdater = minLambdaInVariableUpdaterParam.toDouble
     val solverClasses = Array(CholeskySolver, NNLSSolver,
       NNLSSolverDifferentLambda)
 
-    val outDir = args(0)
 
     new File(outDir).mkdirs()
 
@@ -85,35 +97,35 @@ object ALSTestingFramework {
 
     for (solver1 <- solverClasses; solver2 <- solverClasses;
          maxIter <- maxIterations; rank <- ranks) {
-      if ( (solver1 == CholeskySolver && solver2 == NNLSSolverDifferentLambda)
-      || (solver1 == NNLSSolverDifferentLambda && solver2 == CholeskySolver)) {
-        // nothing to do
-      }
-      else {
-        for (constLambda <- lambdasForConstUpdater) {
-          runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
-            solver1(),
-            solver2(),
-            training, test, maxIter, rank)
+      //      if ( (solver1 == CholeskySolver && solver2 == NNLSSolverDifferentLambda)
+      //      || (solver1 == NNLSSolverDifferentLambda && solver2 == CholeskySolver)) {
+      //        // nothing to do
+      //      }
+      //      else {
+      for (constLambda <- lambdasForConstUpdater) {
+        runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
+          solver1(),
+          solver2(),
+          training, test, maxIter, rank)
 
-          for (variableLambda <- lambdasForVariableUpdater) {
-            for (division <- divisions) {
-              runWithLambdaUpdater(
-                VariableLambda(variableLambda, Math.pow(10, -10.0), division),
-                ConstLambda(constLambda),
-                solver1(),
-                solver2(),
-                training, test, maxIter, rank)
+        for (variableLambda <- lambdasForVariableUpdater) {
+          for (division <- divisions) {
+            runWithLambdaUpdater(
+              VariableLambda(variableLambda, minLambdaInVariableUpdater, division),
+              ConstLambda(constLambda),
+              solver1(),
+              solver2(),
+              training, test, maxIter, rank)
 
-              runWithLambdaUpdater(
-                ConstLambda(constLambda),
-                VariableLambda(variableLambda, Math.pow(10, -10.0), division),
-                solver1(),
-                solver2(),
-                training, test, maxIter, rank)
-            }
+            runWithLambdaUpdater(
+              ConstLambda(constLambda),
+              VariableLambda(variableLambda, minLambdaInVariableUpdater, division),
+              solver1(),
+              solver2(),
+              training, test, maxIter, rank)
           }
         }
+        // }
       }
     }
 
