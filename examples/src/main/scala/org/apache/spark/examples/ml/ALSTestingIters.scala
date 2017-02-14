@@ -30,7 +30,7 @@ import org.apache.spark.sql.Dataset
 // $example off$
 import org.apache.spark.sql.SparkSession
 
-object ALSTestingFramework {
+object ALSTestingIters {
 
 
   // $example on$
@@ -47,9 +47,11 @@ object ALSTestingFramework {
   case class AlsParams(rmse: Double, maxIter: Int, rank: Int, solver1: String, solver2: String,
                        lambdaUpdater1: String, lambdaUpdater2: String)
 
-  val map = new util.HashMap[String, PrintStream]()
+  // val map = new util.HashMap[String, PrintStream]()
 
-  var bestAlsParams = AlsParams(Double.PositiveInfinity, 0, 0, "", "", "", "")
+  var outputDir : String = ""
+
+  //  var bestAlsParams = AlsParams(Double.PositiveInfinity, 0, 0, "", "", "", "")
 
   def main(args: Array[String]) {
     val spark = SparkSession
@@ -71,37 +73,35 @@ object ALSTestingFramework {
     //    val ratings = spark.read.textFile("data/mllib/als/sample_movielens_ratings.txt")
     //      .map(parseRating)
     //      .toDF()
+
     val ratings = spark.read.textFile(inputFile)
       .map(parseRating)
       .toDF()
     val Array(training, test) = ratings.randomSplit(Array(0.8, 0.2))
 
-    val maxIterations = maxIterParams.split(",").map(_.toInt)
+    val maxIter = maxIterParams.toInt
     val lambdasForVariableUpdater = lambdasForVariableUpdaterParams.split(",").map(_.toDouble)
     val lambdasForConstUpdater = lambdasForConstUpdaterParams.split(",").map(_.toDouble)
     val ranks = ranksParams.split(",").map(_.toInt)
     val divisions = divisionsParam.split(",").map(_.toDouble)
     val minLambdaInVariableUpdater = minLambdaInVariableUpdaterParam.toDouble
-    val solverClasses = Array(CholeskySolver, NNLSSolver,
-      NNLSSolverDifferentLambda)
+
+    val solverClasses1 = Array(CholeskySolver, NNLSSolver)
+    val solverClasses2 = Array(NNLSSolver)
 
 
     new File(outDir).mkdirs()
+    outputDir = outDir
 
-    for (solver1 <- solverClasses; solver2 <- solverClasses) {
-      val fileName = solver1().getClass.getSimpleName + "_" + solver2().getClass.getSimpleName
-      val file = new File(outDir + fileName)
-      val outputStream = new PrintStream(file)
-      map.put(fileName, outputStream)
-    }
+//    for (solver1 <- solverClasses1; solver2 <- solverClasses2) {
+//      val fileName = solver1().getClass.getSimpleName + "_" + solver2().getClass.getSimpleName
+//      val file = new File(outDir + fileName)
+//      val outputStream = new PrintStream(file)
+//      map.put(fileName, outputStream)
+//    }
 
-    for (solver1 <- solverClasses; solver2 <- solverClasses;
-         maxIter <- maxIterations; rank <- ranks) {
-      //      if ( (solver1 == CholeskySolver && solver2 == NNLSSolverDifferentLambda)
-      //      || (solver1 == NNLSSolverDifferentLambda && solver2 == CholeskySolver)) {
-      //        // nothing to do
-      //      }
-      //      else {
+    for (solver1 <- solverClasses1; solver2 <- solverClasses2;
+         rank <- ranks) {
       for (constLambda <- lambdasForConstUpdater) {
         runWithLambdaUpdater(ConstLambda(constLambda), ConstLambda(constLambda),
           solver1(),
@@ -125,20 +125,18 @@ object ALSTestingFramework {
               training, test, maxIter, rank)
           }
         }
-        // }
       }
     }
 
-    val file = new File(outDir + "theBest")
-    val outputStream = new PrintStream(file)
-    outputStream.println(bestAlsParams.toString)
-    outputStream.close()
+    //    val file = new File(outDir + "theBest")
+    //    val outputStream = new PrintStream(file)
+    //    outputStream.println(bestAlsParams.toString)
+    //    outputStream.close()
 
-
-    for (solver1 <- solverClasses; solver2 <- solverClasses) {
-      val fileName = solver1().getClass.getSimpleName + "_" + solver2().getClass.getSimpleName
-      map.get(fileName).close()
-    }
+//    for (solver1 <- solverClasses1; solver2 <- solverClasses2) {
+//      val fileName = solver1().getClass.getSimpleName + "_" + solver2().getClass.getSimpleName
+//      map.get(fileName).close()
+//    }
 
     spark.stop()
   }
@@ -155,34 +153,60 @@ object ALSTestingFramework {
       .setItemCol("movieId")
       .setRatingCol("rating")
 
-    val model = als.fit(training, lambdaUpdater1, lambdaUpdater2,
-      solver1, solver2)
+    val modelList = als.fit_list(training, lambdaUpdater1, lambdaUpdater2, solver1, solver2)
 
-    val predictions = model.transform(test)
-    val evaluator = new RegressionEvaluator()
-      .setMetricName("rmse")
-      .setLabelCol("rating")
-      .setPredictionCol("prediction")
+    val iterRmse = modelList.map {
+      case (i: Int, model: ALSModel) =>
+        val predictions = model.transform(test)
+        val evaluator = new RegressionEvaluator()
+          .setMetricName("rmse")
+          .setLabelCol("rating")
+          .setPredictionCol("prediction")
 
-    val rmse = evaluator.evaluate(predictions)
+        val rmse = evaluator.evaluate(predictions)
 
-    model.itemFactors.unpersist()
-    model.userFactors.unpersist()
+        model.itemFactors.unpersist()
+        model.userFactors.unpersist()
 
-    if (rmse < bestAlsParams.rmse) {
-      bestAlsParams = AlsParams(rmse, maxIter, rank,
-        solver1.getClass.getSimpleName,
-        solver2.getClass.getSimpleName,
-        lambdaUpdater1.toString, lambdaUpdater2.toString)
+        (i, rmse)
     }
 
-    val fileName = solver1.getClass.getSimpleName + "_" + solver2.getClass.getSimpleName
+    //    val model = als.fit(training, lambdaUpdater1, lambdaUpdater2,
+    //      solver1, solver2)
+    //
+    //    val predictions = model.transform(test)
+    //    val evaluator = new RegressionEvaluator()
+    //      .setMetricName("rmse")
+    //      .setLabelCol("rating")
+    //      .setPredictionCol("prediction")
+    //
+    //    val rmse = evaluator.evaluate(predictions)
 
-    val csvLine = "%015.10f;%s;%s;%s;%s;%d;%d".format(rmse, solver1.getClass.getSimpleName,
-      solver2.getClass.getSimpleName, lambdaUpdater1.toString, lambdaUpdater2.toString,
-      maxIter, rank)
+    //    model.itemFactors.unpersist()
+    //    model.userFactors.unpersist()
+    //
+    //    if (rmse < bestAlsParams.rmse) {
+    //      bestAlsParams = AlsParams(rmse, maxIter, rank,
+    //        solver1.getClass.getSimpleName,
+    //        solver2.getClass.getSimpleName,
+    //        lambdaUpdater1.toString, lambdaUpdater2.toString)
+    //    }
 
-    map.get(fileName).println(csvLine)
+    val fileName = solver1.getClass.getSimpleName + "_" + solver2.getClass.getSimpleName +
+      "_" + lambdaUpdater1.filename() + "_" + lambdaUpdater2.filename() + s"_$rank"
+    val file = new File(outputDir + fileName)
+    val outputStream = new PrintStream(file)
+
+    iterRmse.foreach {
+      case (i: Int, rmse: Double) =>
+        val csvLine = "%015.10f;%s;%s;%s;%s;%d;%d".format(rmse, solver1.getClass.getSimpleName,
+          solver2.getClass.getSimpleName, lambdaUpdater1.toString, lambdaUpdater2.toString,
+          i, rank)
+
+       outputStream.println(csvLine)
+    }
+
+    outputStream.close()
   }
 
 }

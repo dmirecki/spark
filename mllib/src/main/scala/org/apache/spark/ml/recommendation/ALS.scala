@@ -43,6 +43,7 @@ import org.json4s.DefaultFormats
 import org.json4s.JsonDSL._
 
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 import scala.reflect.ClassTag
 import scala.util.hashing.byteswap64
 import scala.util.{Sorting, Try}
@@ -366,12 +367,18 @@ abstract class LambdaUpdater() {
   def reset(): Unit = {
     lambda = 0
   }
+
+  def filename(): String
 }
 
 case class ConstLambda(override var lambda: Double) extends LambdaUpdater {
   override def reset(): Unit = {}
 
   override def update(): Unit = {}
+
+  override def filename(): String = {
+    s"ConstLambda$lambda"
+  }
 
   override def toString(): String = {
     s"{ConstLambda: lambda=$lambda}"
@@ -394,6 +401,10 @@ case class VariableLambda(override var lambda: Double,
 
   override def toString: String = {
     s"{VariableLambda: start_lambda=$initial_lambda min_val=$minimal_value div=$division}"
+  }
+
+  override def filename(): String = {
+    s"VariableLambda$initial_lambda-$division"
   }
 }
 
@@ -721,6 +732,17 @@ class ALS(@Since("1.4.0") override val uid: String) extends Estimator[ALSModel] 
            lambdaUpdater2: LambdaUpdater,
            solver1: LeastSquaresNESolver,
            solver2: LeastSquaresNESolver): ALSModel = {
+    fit_list(dataset, lambdaUpdater1, lambdaUpdater2, solver1, solver2).last._2
+  }
+
+
+  @Since("2.0.0")
+  def fit_list(
+                dataset: Dataset[_],
+                lambdaUpdater1: LambdaUpdater,
+                lambdaUpdater2: LambdaUpdater,
+                solver1: LeastSquaresNESolver,
+                solver2: LeastSquaresNESolver): List[(Int, ALSModel)] = {
     transformSchema(dataset.schema)
     import dataset.sparkSession.implicits._
 
@@ -736,7 +758,8 @@ class ALS(@Since("1.4.0") override val uid: String) extends Estimator[ALSModel] 
     instrLog.logParams(rank, numUserBlocks, numItemBlocks, implicitPrefs, alpha,
       userCol, itemCol, ratingCol, predictionCol, maxIter,
       regParam, nonnegative, checkpointInterval, seed)
-    val (userFactors, itemFactors) = ALS.train(ratings, rank = $(rank),
+
+    val userFactorsANDitemFactorsList = ALS.train_list(ratings, rank = $(rank),
       numUserBlocks = $(numUserBlocks), numItemBlocks = $(numItemBlocks),
       maxIter = $(maxIter), regParam = $(regParam), implicitPrefs = $(implicitPrefs),
       alpha = $(alpha), nonnegative = $(nonnegative), solver1 = solver1, solver2 = solver2,
@@ -744,11 +767,36 @@ class ALS(@Since("1.4.0") override val uid: String) extends Estimator[ALSModel] 
       intermediateRDDStorageLevel = StorageLevel.fromString($(intermediateStorageLevel)),
       finalRDDStorageLevel = StorageLevel.fromString($(finalStorageLevel)),
       checkpointInterval = $(checkpointInterval), seed = $(seed))
-    val userDF = userFactors.toDF("id", "features")
-    val itemDF = itemFactors.toDF("id", "features")
-    val model = new ALSModel(uid, $(rank), userDF, itemDF).setParent(this)
-    instrLog.logSuccess(model)
-    copyValues(model)
+
+    val modelList = userFactorsANDitemFactorsList.map {
+      case (iter: Int, userFactors: RDD[(Int, Array[Float])],
+      itemFactors: RDD[(Int, Array[Float])]) =>
+        (iter, userFactors.toDF("id", "features"), itemFactors.toDF("id", "features"))
+    }.map {
+      case (iter: Int, userDF: DataFrame, itemDF: DataFrame) =>
+        (iter,
+          new ALSModel(uid, $(rank), userDF, itemDF).setParent(this)
+        )
+    }.map {
+      case (iter: Int, model: ALSModel) =>
+        (iter, copyValues(model))
+    }
+    modelList
+    //    val (userFactors, itemFactors) = ALS.train(ratings, rank = $(rank),
+    //      numUserBlocks = $(numUserBlocks), numItemBlocks = $(numItemBlocks),
+    //      maxIter = $(maxIter), regParam = $(regParam), implicitPrefs = $(implicitPrefs),
+    //      alpha = $(alpha), nonnegative = $(nonnegative), solver1 = solver1, solver2 = solver2,
+    //      lambdaUpdater1 = lambdaUpdater1, lambdaUpdater2 = lambdaUpdater2,
+    //      intermediateRDDStorageLevel = StorageLevel.fromString($(intermediateStorageLevel)),
+    //      finalRDDStorageLevel = StorageLevel.fromString($(finalStorageLevel)),
+    //      checkpointInterval = $(checkpointInterval), seed = $(seed))
+    //
+    //    val userDF = userFactors.toDF("id", "features")
+    //    val itemDF = itemFactors.toDF("id", "features")
+    //
+    //    val model = new ALSModel(uid, $(rank), userDF, itemDF).setParent(this)
+    //    instrLog.logSuccess(model)
+    //    copyValues(model)
   }
 
   @Since("1.3.0")
@@ -782,11 +830,7 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
   @Since("1.6.0")
   override def load(path: String): ALS = super.load(path)
 
-  /**
-    * :: DeveloperApi ::
-    * Implementation of the ALS algorithm.
-    */
-  @DeveloperApi
+
   def train[ID: ClassTag](// scalastyle:ignore
                           ratings: RDD[Rating[ID]],
                           rank: Int = 10,
@@ -806,6 +850,40 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
                           lambdaUpdater1: LambdaUpdater = null,
                           lambdaUpdater2: LambdaUpdater = null)(
                            implicit ord: Ordering[ID]): (RDD[(ID, Array[Float])], RDD[(ID, Array[Float])]) = {
+
+    val listResultLast = train_list(ratings, rank, numUserBlocks, numItemBlocks,
+      maxIter, regParam, implicitPrefs, alpha, nonnegative,
+      intermediateRDDStorageLevel, finalRDDStorageLevel,
+      checkpointInterval, seed, solver1, solver2, lambdaUpdater1, lambdaUpdater2).last
+
+    (listResultLast._2, listResultLast._3)
+  }
+
+  /**
+    * :: DeveloperApi ::
+    * Implementation of the ALS algorithm.
+    */
+  @DeveloperApi
+  def train_list[ID: ClassTag](// scalastyle:ignore
+                               ratings: RDD[Rating[ID]],
+                               rank: Int = 10,
+                               numUserBlocks: Int = 10,
+                               numItemBlocks: Int = 10,
+                               maxIter: Int = 10,
+                               regParam: Double = 1.0,
+                               implicitPrefs: Boolean = false,
+                               alpha: Double = 1.0,
+                               nonnegative: Boolean = false,
+                               intermediateRDDStorageLevel: StorageLevel =
+                               StorageLevel.MEMORY_AND_DISK,
+                               finalRDDStorageLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK,
+                               checkpointInterval: Int = 10,
+                               seed: Long = 0L,
+                               solver1: LeastSquaresNESolver = null,
+                               solver2: LeastSquaresNESolver = null,
+                               lambdaUpdater1: LambdaUpdater = null,
+                               lambdaUpdater2: LambdaUpdater = null)(
+                                implicit ord: Ordering[ID]): List[(Int, RDD[(ID, Array[Float])], RDD[(ID, Array[Float])])] = {
     require(!ratings.isEmpty(), s"No ratings available from $ratings")
     require(intermediateRDDStorageLevel != StorageLevel.NONE,
       "ALS is not designed to run without persisting intermediate RDDs.")
@@ -849,6 +927,9 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
     lambdaUpdater1.reset()
     lambdaUpdater2.reset()
 
+    var userFactorsItemFactorsListBuilder =
+      new ListBuffer[(Int, RDD[(Int, FactorBlock)], RDD[(Int, FactorBlock)])]()
+
     if (implicitPrefs) {
       for (iter <- 1 to maxIter) {
         userFactors.setName(s"userFactors-$iter").persist(intermediateRDDStorageLevel)
@@ -863,7 +944,7 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
         if (shouldCheckpoint(iter)) {
           itemFactors.checkpoint() // itemFactors gets materialized in computeFactors
         }
-        val previousUserFactors = userFactors
+        // val previousUserFactors = userFactors
         userFactors = computeFactors(itemFactors, itemOutBlocks, userInBlocks, rank,
           lambdaUpdater2.lambda,
           itemLocalIndexEncoder, implicitPrefs, alpha, solver2)
@@ -872,7 +953,9 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
           deletePreviousCheckpointFile()
           previousCheckpointFile = itemFactors.getCheckpointFile
         }
-        previousUserFactors.unpersist()
+        // previousUserFactors.unpersist()
+
+        userFactorsItemFactorsListBuilder += ((iter, userFactors, itemFactors))
 
         lambdaUpdater1.update()
         lambdaUpdater2.update()
@@ -894,43 +977,91 @@ object ALS extends DefaultParamsReadable[ALS] with Logging {
           lambdaUpdater2.lambda,
           itemLocalIndexEncoder, solver = solver2)
 
+        userFactorsItemFactorsListBuilder += ((iter, userFactors, itemFactors))
+
         lambdaUpdater1.update()
         lambdaUpdater2.update()
       }
     }
-    val userIdAndFactors = userInBlocks
-      .mapValues(_.srcIds)
-      .join(userFactors)
-      .mapPartitions({ items =>
-        items.flatMap { case (_, (ids, factors)) =>
-          ids.view.zip(factors)
-        }
-        // Preserve the partitioning because IDs are consistent with the partitioners in userInBlocks
-        // and userFactors.
-      }, preservesPartitioning = true)
-      .setName("userFactors")
-      .persist(finalRDDStorageLevel)
-    val itemIdAndFactors = itemInBlocks
-      .mapValues(_.srcIds)
-      .join(itemFactors)
-      .mapPartitions({ items =>
-        items.flatMap { case (_, (ids, factors)) =>
-          ids.view.zip(factors)
-        }
-      }, preservesPartitioning = true)
-      .setName("itemFactors")
-      .persist(finalRDDStorageLevel)
+
+    val userFactorsItemFactorsList = userFactorsItemFactorsListBuilder.toList
+
+    //        val userIdAndFactors = userInBlocks
+    //          .mapValues(_.srcIds)
+    //          .join(userFactors)
+    //          .mapPartitions({ items =>
+    //            items.flatMap { case (_, (ids, factors)) =>
+    //              ids.view.zip(factors)
+    //            }
+    //            // Preserve the partitioning because IDs are consistent with the partitioners in userInBlocks
+    //            // and userFactors.
+    //          }, preservesPartitioning = true)
+    //          .setName("userFactors")
+    //          .persist(finalRDDStorageLevel)
+    //
+    //        val itemIdAndFactors = itemInBlocks
+    //          .mapValues(_.srcIds)
+    //          .join(itemFactors)
+    //          .mapPartitions({ items =>
+    //            items.flatMap { case (_, (ids, factors)) =>
+    //              ids.view.zip(factors)
+    //            }
+    //          }, preservesPartitioning = true)
+    //          .setName("itemFactors")
+    //          .persist(finalRDDStorageLevel)
+
+
+    val userIdAndFactorsANDitemIdAndFactors = userFactorsItemFactorsList.map {
+      case (i: Int, user: RDD[(Int, FactorBlock)], item: RDD[(Int, FactorBlock)]) =>
+        (i,
+          userInBlocks
+            .mapValues(_.srcIds)
+            .join(user)
+            .mapPartitions({ items =>
+              items.flatMap { case (_, (ids, factors)) =>
+                ids.view.zip(factors)
+              }
+              // Preserve the partitioning because IDs are consistent with the partitioners in userInBlocks
+              // and userFactors.
+            }, preservesPartitioning = true)
+            .setName(s"userFactors$i")
+            .persist(finalRDDStorageLevel),
+
+          itemInBlocks
+            .mapValues(_.srcIds)
+            .join(item)
+            .mapPartitions({ items =>
+              items.flatMap { case (_, (ids, factors)) =>
+                ids.view.zip(factors)
+              }
+            }, preservesPartitioning = true)
+            .setName(s"itemFactors$i")
+            .persist(finalRDDStorageLevel)
+        )
+    }
+
     if (finalRDDStorageLevel != StorageLevel.NONE) {
-      userIdAndFactors.count()
-      itemFactors.unpersist()
-      itemIdAndFactors.count()
+      userIdAndFactorsANDitemIdAndFactors.foreach {
+        case (i: Int, user: RDD[(ID, Array[Float])], item: RDD[(ID, Array[Float])]) =>
+          user.count()
+          item.count()
+      }
+      userFactorsItemFactorsList.foreach {
+        case (i: Int, user: RDD[(Int, FactorBlock)], item: RDD[(Int, FactorBlock)]) =>
+          user.unpersist()
+          item.unpersist()
+      }
+      // userIdAndFactors.count()
+      // itemFactors.unpersist()
+      // itemIdAndFactors.count()
       userInBlocks.unpersist()
       userOutBlocks.unpersist()
       itemInBlocks.unpersist()
       itemOutBlocks.unpersist()
       blockRatings.unpersist()
     }
-    (userIdAndFactors, itemIdAndFactors)
+    // (userIdAndFactors, itemIdAndFactors)
+    userIdAndFactorsANDitemIdAndFactors
   }
 
   /**
