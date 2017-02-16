@@ -68,6 +68,8 @@ object ALSTestingIters {
     val ranksParams = args(5)
     val divisionsParam = args(6)
     val minLambdaInVariableUpdaterParam = args(7)
+    val solver1Params = args(8)
+    val solver2Params = args(9)
 
     // $example on$
     //    val ratings = spark.read.textFile("data/mllib/als/sample_movielens_ratings.txt")
@@ -86,8 +88,10 @@ object ALSTestingIters {
     val divisions = divisionsParam.split(",").map(_.toDouble)
     val minLambdaInVariableUpdater = minLambdaInVariableUpdaterParam.toDouble
 
-    val solverClasses1 = Array(CholeskySolver, NNLSSolver)
-    val solverClasses2 = Array(NNLSSolver)
+    val solvers = Array(CholeskySolver, NNLSSolver, NNLSSolverDifferentLambda)
+
+    val solverClasses1 = solver1Params.split(",").map(_.toInt).map(index => solvers(index))
+    val solverClasses2 = solver2Params.split(",").map(_.toInt).map(index => solvers(index))
 
 
     new File(outDir).mkdirs()
@@ -146,6 +150,7 @@ object ALSTestingIters {
                            solver1: LeastSquaresNESolver, solver2: LeastSquaresNESolver,
                            training: Dataset[_], test: Dataset[_],
                            maxIter: Int, rank: Int) {
+    val start = System.currentTimeMillis()
     val als = new ALS()
       .setMaxIter(maxIter)
       .setRank(rank)
@@ -192,6 +197,8 @@ object ALSTestingIters {
     //        lambdaUpdater1.toString, lambdaUpdater2.toString)
     //    }
 
+    val durration = System.currentTimeMillis() - start
+
     val fileName = solver1.getClass.getSimpleName + "_" + solver2.getClass.getSimpleName +
       "_" + lambdaUpdater1.filename() + "_" + lambdaUpdater2.filename() + s"_$rank"
     val file = new File(outputDir + fileName)
@@ -207,6 +214,11 @@ object ALSTestingIters {
     }
 
     outputStream.close()
+
+    val performanceFile = new File(outputDir + fileName + "-time")
+    val performanceOutStream = new PrintStream(performanceFile)
+    performanceOutStream.println( durration )
+    performanceOutStream.close()
   }
 
 }
